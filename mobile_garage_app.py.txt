@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ============================================================================
 # ФАЙЛ: mobile_garage_app.py
 # ОПИСАНИЕ: Калькулятор гаража с 3D визуализацией
@@ -224,4 +225,232 @@ st.download_button(
 # Footer
 st.markdown("---")
 st.warning("⚠️ **ВАЖНО:** Расчет предварительный. Для строительства нужен проект по СП.")
+=======
+# ============================================================================
+# ФАЙЛ: mobile_garage_app.py
+# ОПИСАНИЕ: Калькулятор гаража с 3D визуализацией
+# ============================================================================
+
+import streamlit as st
+import plotly.graph_objects as go
+import numpy as np
+import pandas as pd
+from datetime import datetime
+import io
+
+# ============================================================================
+# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
+# ============================================================================
+st.set_page_config(
+    page_title="🏗️ Гараж Калькулятор",
+    page_icon="🏗️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Стили для мобильной адаптации
+st.markdown("""
+<style>
+    .main > div {padding-top: 2rem;}
+    .stMetric {background-color: #f0f2f6; padding: 10px; border-radius: 5px;}
+    div[data-testid="stMetricValue"] {font-size: 24px;}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================================
+# 2. БОКОВАЯ ПАНЕЛЬ (НАСТРОЙКИ)
+# ============================================================================
+with st.sidebar:
+    st.header("⚙️ Настройки")
+    
+    construction_type = st.radio(
+        "Тип фермы:",
+        ["Треугольная", "Трапециевидная", "С параллельными поясами"],
+        index=0
+    )
+    
+    st.markdown("---")
+    length = st.number_input("Длина (м)", min_value=10.0, max_value=50.0, value=30.0, step=1.0)
+    width = st.number_input("Ширина (м)", min_value=6.0, max_value=20.0, value=10.0, step=1.0)
+    height = st.number_input("Высота стен (м)", min_value=2.5, max_value=6.0, value=3.5, step=0.5)
+    roof_pitch = st.number_input("Уклон крыши (%)", min_value=5, max_value=45, value=15, step=1)
+    
+    st.markdown("---")
+    snow_region = st.selectbox("Снеговой район", ["I (0.8)", "II (1.2)", "III (1.8)", "IV (2.4)"], index=3)
+    steel_grade = st.selectbox("Сталь", ["С245", "С345/09Г2С", "С355"], index=1)
+    truss_step = st.slider("Шаг ферм (м)", 2.0, 6.0, 4.0, 0.5)
+
+# ============================================================================
+# 3. РАСЧЕТНЫЕ ФУНКЦИИ
+# ============================================================================
+
+def get_snow_load(region_str):
+    snow_map = {"I (0.8)": 0.8, "II (1.2)": 1.2, "III (1.8)": 1.8, "IV (2.4)": 2.4}
+    return snow_map.get(region_str, 2.4)
+
+def get_steel_strength(grade_str):
+    strength_map = {"С245": 245, "С345/09Г2С": 345, "С355": 355}
+    return strength_map.get(grade_str, 345)
+
+def calculate_truss_forces(span, height, snow_load, truss_step, truss_type="Треугольная"):
+    total_load = (snow_load + 0.3 + 0.1) * span * truss_step
+    truss_height = span / 10 if truss_type == "Треугольная" else span / 12
+    max_moment = total_load * span / 8
+    chord_force = max_moment / truss_height if truss_height > 0 else 0
+    web_force = chord_force * 0.35
+    post_force = total_load / 2
+    
+    return {
+        'chord_force': chord_force,
+        'web_force': web_force,
+        'post_force': post_force,
+        'total_load': total_load,
+        'truss_height': truss_height
+    }
+
+def check_section_capacity(force, section, steel_strength):
+    area = section['area']
+    ry = steel_strength / 1000 / 1.05
+    capacity = area * ry
+    utilization = force / capacity if capacity > 0 else 999
+    return utilization
+
+def get_pipe_sections():
+    return [
+        {'name': '50×50×3', 'area': 5.49, 'weight': 4.31},
+        {'name': '60×60×3', 'area': 6.69, 'weight': 5.25},
+        {'name': '80×80×3', 'area': 9.09, 'weight': 7.14},
+        {'name': '100×100×4', 'area': 15.29, 'weight': 12.00},
+        {'name': '100×100×5', 'area': 18.84, 'weight': 14.79},
+        {'name': '120×120×5', 'area': 22.84, 'weight': 17.93},
+    ]
+
+# ============================================================================
+# 4. 3D ВИЗУАЛИЗАЦИЯ
+# ============================================================================
+
+def create_3d_model(length, width, height, roof_pitch, truss_step, truss_type):
+    fig = go.Figure()
+    num_trusses = int(length / truss_step) + 1
+    colors = {'posts': '#2E86AB', 'trusses': '#A23B72', 'purlins': '#F18F01'}
+    
+    roof_height = height + (width / 2) * (roof_pitch / 100)
+    
+    # Стойки
+    for i in range(num_trusses):
+        x_pos = i * truss_step
+        fig.add_trace(go.Scatter3d(
+            x=[x_pos, x_pos], y=[0, 0], z=[0, height],
+            mode='lines', line=dict(color=colors['posts'], width=6),
+            name='Стойки' if i == 0 else '', showlegend=(i==0)
+        ))
+        fig.add_trace(go.Scatter3d(
+            x=[x_pos, x_pos], y=[width, width], z=[0, height],
+            mode='lines', line=dict(color=colors['posts'], width=6),
+            showlegend=False
+        ))
+    
+    # Фермы
+    for i in range(num_trusses):
+        x_pos = i * truss_step
+        fig.add_trace(go.Scatter3d(
+            x=[x_pos, x_pos + width/2, x_pos + width],
+            y=[0, width/2, width],
+            z=[height, roof_height, height],
+            mode='lines',
+            line=dict(color=colors['trusses'], width=5),
+            name='Фермы' if i == 0 else '', showlegend=(i==0)
+        ))
+    
+    # Прогоны
+    for j in range(5):
+        y_pos = (j + 1) * width / 6
+        z_pos = height + min(y_pos, width - y_pos) * (roof_pitch / 100)
+        fig.add_trace(go.Scatter3d(
+            x=[0, length], y=[y_pos, y_pos], z=[z_pos, z_pos],
+            mode='lines', line=dict(color=colors['purlins'], width=3),
+            name='Прогоны' if j == 0 else '', showlegend=(j==0)
+        ))
+    
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(title='Длина (м)'),
+            yaxis=dict(title='Ширина (м)'),
+            zaxis=dict(title='Высота (м)'),
+            aspectmode='data'
+        ),
+        height=500,
+        showlegend=True,
+        margin=dict(l=0, r=0, t=0, b=0)
+    )
+    return fig
+
+# ============================================================================
+# 5. ОСНОВНОЙ ИНТЕРФЕЙС
+# ============================================================================
+
+st.title("🏗️ Калькулятор гаража")
+st.markdown("**Версия для мобильных и ПК** 📱")
+
+snow_load = get_snow_load(snow_region)
+steel_strength = get_steel_strength(steel_grade)
+pipe_sections = get_pipe_sections()
+
+current_forces = calculate_truss_forces(width, height, snow_load, truss_step, construction_type)
+
+# Метрики
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("❄️ Снег", f"{snow_load} кПа")
+with col2:
+    st.metric("🏗️ Нагрузка", f"{current_forces['total_load']:.0f} кН")
+with col3:
+    st.metric("📐 Высота фермы", f"{current_forces['truss_height']:.2f} м")
+
+# 3D Модель
+st.subheader("📐 3D Модель")
+fig_3d = create_3d_model(length, width, height, roof_pitch, truss_step, construction_type)
+st.plotly_chart(fig_3d, use_container_width=True)
+
+# Таблица сечений
+st.subheader("📊 Подбор сечений")
+results = []
+for section in pipe_sections:
+    chord_util = check_section_capacity(current_forces['chord_force'], section, steel_strength)
+    post_util = check_section_capacity(current_forces['post_force'], section, steel_strength)
+    max_util = max(chord_util, post_util)
+    status = "✅" if max_util <= 0.8 else ("⚠️" if max_util <= 1.0 else "❌")
+    
+    results.append({
+        'Сечение': section['name'],
+        'Вес кг/м': section['weight'],
+        'Статус': f"{max_util:.2f} {status}",
+        'max_util': max_util
+    })
+
+results_df = pd.DataFrame(results)
+suitable = results_df[results_df['max_util'] <= 1.0]
+
+if len(suitable) > 0:
+    st.success(f"✅ Найдено {len(suitable)} подходящих сечений")
+    st.dataframe(suitable[['Сечение', 'Вес кг/м', 'Статус']], use_container_width=True, hide_index=True)
+    best = suitable.iloc[0]
+    st.info(f"💡 **Рекомендация:** {best['Сечение']}")
+else:
+    st.error("❌ Нет подходящих сечений! Увеличьте марку стали.")
+
+# Экспорт
+st.subheader("💾 Экспорт")
+csv_data = results_df.to_csv(index=False, sep=';', decimal=',')
+st.download_button(
+    label="📥 Скачать расчет (CSV)",
+    data=csv_data,
+    file_name="garage_calculation.csv",
+    mime="text/csv"
+)
+
+# Footer
+st.markdown("---")
+st.warning("⚠️ **ВАЖНО:** Расчет предварительный. Для строительства нужен проект по СП.")
+>>>>>>> 48aad3b3d99fcc4dbda5628008542b20efd8021f
 st.markdown("<div style='text-align: center; color: gray;'>🏗️ Garage Calculator v1.0 | 2025</div>", unsafe_allow_html=True)
